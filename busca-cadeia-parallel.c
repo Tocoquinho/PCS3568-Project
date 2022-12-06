@@ -70,18 +70,32 @@ int main(int argc, char *argv[])
     line = 1;
     fgets(sequencia_busca, SIZE, file_target); // Guarda a primeira linha em sequencia_busca
     i_seq = 0; 
-    ocorrencias = 0;                                // Representa o total de caracteres lidos ate o momento
-    while (i_seq < arq2_size) {
-        fgets(buff, SIZE, file_sequences); // Leitura de uma linha
-        i_seq += strlen(buff);
-        achou = strcmp(sequencia_busca, buff); // encontrou: achou=0
+    ocorrencias = 0; // Representa o total de caracteres lidos ate o momento
 
-        if (achou == 0) {
-            line_ocorrencia[ocorrencias] = line;
-            ocorrencias++;
+    #pragma omp parallel num_threads(16)
+    {
+        #pragma omp single
+        {
+            while (i_seq < arq2_size) {
+                fgets(buff, SIZE, file_sequences); // Leitura de uma linha
+                i_seq += strlen(buff);
+                
+                #pragma omp task firstprivate(buff, line) private(achou) shared(line_ocorrencia, ocorrencias)
+                {
+                    achou = strcmp(sequencia_busca, buff); // encontrou: achou=0
+
+                    if (achou == 0) {
+                        #pragma omp critical
+                        {
+                            line_ocorrencia[ocorrencias] = line;
+                            ocorrencias++;                   
+                        }
+                    }                    
+                    fflush(stdout);
+                }
+                line++;
+            }
         }
-
-        line++;
     }
 
     // Fecha os arquivos
@@ -110,5 +124,6 @@ int main(int argc, char *argv[])
         printf("\n");
     }
     printf("=======================================\n");
+
     return 0;
 }
