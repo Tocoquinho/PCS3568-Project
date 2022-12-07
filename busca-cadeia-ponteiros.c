@@ -15,6 +15,10 @@
 #define NUM_THREADS 16
 
 long int line_ocorrencia[MAX_OCORRENCIAS];
+long int thread_line_ocorrencias[NUM_THREADS][MAX_OCORRENCIAS];
+long int thread_lines[NUM_THREADS];
+long int thread_ocorrencias[NUM_THREADS];
+long int thread_ocorrencias[NUM_THREADS];
 int main(int argc, char *argv[])
 {
     char buff[SIZE];
@@ -29,7 +33,6 @@ int main(int argc, char *argv[])
     FILE *file_sequences;
     long int arq2_size;
     long int line;
-
 
     TIMER_CLEAR;
 
@@ -67,13 +70,13 @@ int main(int argc, char *argv[])
     // Logica para encontrar o target dentro do arquivo
     TIMER_START;
 
-    ocorrencias = 0; // Representa o total de caracteres lidos ate o momento
     fgets(sequencia_busca, SIZE, file_target); // Guarda a primeira linha em sequencia_busca
+    ocorrencias = 0; // Representa o total de caracteres lidos ate o momento
+    line = 0;
 
-    #pragma omp parallel num_threads(NUM_THREADS) private(buff, achou, i_seq, line, file_sequences) shared(line_ocorrencia, ocorrencias)
+    #pragma omp parallel num_threads(NUM_THREADS) private(buff, achou, i_seq, file_sequences) shared(thread_line_ocorrencias, thread_lines, thread_ocorrencias) firstprivate(line)
     {   
         i_seq = 0;
-        line = 1;
 
         if (argc == 3) {
             file_sequences = fopen(argv[2], "r");
@@ -92,33 +95,58 @@ int main(int argc, char *argv[])
         long int size = arq2_size / nthreads;
         long int start = size * ithread;
 
-        fseek(file_sequences, start, SEEK_SET); // Leva o ponteiro do arquivo para o comeco da thread
+        thread_lines[ithread] = line; // Inicializa contador de linhas da thread
+
+        if (start != 0L) {
+            fseek(file_sequences, start - 1L, SEEK_SET); // Leva o ponteiro do arquivo para uma posicao anterior do comeco da thread
+            fgets(buff, SIZE, file_sequences); // Leitura da linha que começa na posicao anterior do comeco da thread
+            
+            if (buff[0] == '\n') { // Se a linha anterior comeca com end line, a thread comeca no inicio de uma linha nova, entao essa linha sera considerada
+                fseek(file_sequences, start, SEEK_SET); // Leva o ponteiro do arquivo para o comeco da thread
+            }
+            else {
+                i_seq += strlen(buff);
+            }
+        }
+        else {
+            fseek(file_sequences, start, SEEK_SET); // Leva o ponteiro do arquivo para o comeco da thread
+        }
 
         while (i_seq < size) {
+            thread_lines[ithread]++;
+
             fgets(buff, SIZE, file_sequences); // Leitura de uma linha
             i_seq += strlen(buff);
         
             achou = strcmp(sequencia_busca, buff); // encontrou: achou=0
 
             if (achou == 0) {
-                #pragma omp critical 
-                {
-                    line_ocorrencia[ocorrencias] = line;
-                    ocorrencias++;                   
-                }
+                thread_line_ocorrencias[ithread][thread_ocorrencias[ithread]] = thread_lines[ithread];
+                thread_ocorrencias[ithread]++;                   
             } 
-            line++;
         }
 
         fclose(file_sequences);
     }
     fclose(file_target);
 
+    // Arrumar as linhas das ocorrencias
+    ocorrencias = 0; // Iterador do total de ocorrencias iterado ate o momento
+    line = 0; // Contador do total de linhas de threads, cumulativo a cada final de iteracao de thread
+    for (int ithread = 0; ithread < NUM_THREADS; ithread++) {
+        for (int iocorrencia = 0; iocorrencia < thread_ocorrencias[ithread]; iocorrencia++) {
+            // Coloca no vetor de ocorrencias as ocorrencias da thread ithread somando as linhas locais da thread com a contagem de linhas correta
+            line_ocorrencia[ocorrencias] = thread_line_ocorrencias[ithread][iocorrencia] + line;
+            ocorrencias++; // Soma um no iterador de ocorrencias total
+        }
+        line += thread_lines[ithread]; // Acumula no contador de linhas o total de linhas da thread iterada
+    }
+
     TIMER_STOP;
     printf("Tempo: %f \n", TIMER_ELAPSED);
     printf("=======================================\n");
     printf("Total de ocorrencias = %d\n", ocorrencias);
-    printf("Total de sequencias = %d\n", line - 1);
+    printf("Total de sequencias = %d\n", line);
     if (ocorrencias < 20) {
         for (i = 0; i < ocorrencias; i++)
             printf("sequencia %d  ", line_ocorrencia[i]);
